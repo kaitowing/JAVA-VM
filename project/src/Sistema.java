@@ -116,13 +116,13 @@ public class Sistema {
 		private ProcessControlBlock[] pcb;
 		private ProcessControlBlock state;
 		private BlockingQueue<ProcessControlBlock> processosProntos;
-		private BlockingQueue<ProcessControlBlock> processosBloqueados;
+		private List<ProcessControlBlock> processosBloqueados;
 		private Semaphore pcbSemaphore;
 		private Memory mem;
 		private int id;
 
 		public ProcessManager(Memory mem, BlockingQueue<ProcessControlBlock> _processosProntos,
-				BlockingQueue<ProcessControlBlock> _processosBloqueados, Semaphore _pcbSemaphore) {
+				List<ProcessControlBlock> _processosBloqueados, Semaphore _pcbSemaphore) {
 			id = 0;
 			this.mem = mem;
 			pcb = new ProcessControlBlock[mem.numFrames];
@@ -259,6 +259,7 @@ public class Sistema {
 		public boolean ready;
 		public int pc;
 		public int id;
+		public int ioParameter;
 
 		public ProcessControlBlock(int id) {
 			tabelaPaginas = null;
@@ -296,7 +297,7 @@ public class Sistema {
 		private boolean trace;
 		private int cpuCicles;
 		private BlockingQueue<ProcessControlBlock> processosProntos;
-		private BlockingQueue<ProcessControlBlock> processosBloqueados;
+		private List<ProcessControlBlock> processosBloqueados;
 		private int pc; // program counter
 		private Word ir; // instruction register
 		private int[] reg; // registradores da CPU
@@ -306,28 +307,29 @@ public class Sistema {
 		private Memory mem; // mem tem funcoes de dump e o array m de memória 'fisica'
 		private Word[] m; // CPU acessa MEMORIA, guarda referencia a 'm'. m nao muda. semre será um array
 											// de palavras
-		private SysCallHandling sysCall; // desvio para tratamento de chamadas de sistema - SYSCALL
 		private boolean debug; // se true entao mostra cada instrucao em execucao
 		private BlockingQueue<String> commandQueue;
 		public ProcessManager pm;
 		private Semaphore memSemaphore;
+		private Semaphore ioSemaphore;
+		private String output;
 
-		public CPU(Memory _mem, SysCallHandling _sysCall, boolean _debug, BlockingQueue<String> _commandQueue,
+		public CPU(Memory _mem, boolean _debug, BlockingQueue<String> _commandQueue,
 				Semaphore _semaphore) {
 			cpuCicles = 0;
 			processosProntos = new ArrayBlockingQueue<ProcessControlBlock>(100);
-			processosBloqueados = new ArrayBlockingQueue<ProcessControlBlock>(100);
+			processosBloqueados = new ArrayList<ProcessControlBlock>();
 			maxInt = 32767; // capacidade de representacao modelada
 			minInt = -32767; // se exceder deve gerar interrupcao de overflow
 			mem = _mem; // usa mem para acessar funcoes auxiliares (dump)
 			m = mem.m; // usa o atributo 'm' para acessar a memoria.
 			reg = new int[10]; // aloca o espaço dos registradores - regs 8 e 9 usados somente para IO
-			sysCall = _sysCall; // aponta para rotinas de tratamento de chamadas de sistema
 			debug = _debug; // se true, print da instrucao em execucao
 			trace = false;
 			commandQueue = _commandQueue;
 			memSemaphore = new Semaphore(1);
 			pm = new ProcessManager(mem, processosProntos, processosBloqueados, _semaphore);
+			ioSemaphore = new Semaphore(0);
 		}
 
 		private boolean legal(int e) {
@@ -409,7 +411,6 @@ public class Sistema {
 					}
 					break;
 				case intIO:
-					System.out.println("Chamada de sistema IO");
 					processosBloqueados.add(pm.salvaEstadoProcesso(pm.state.id));
 					pm.setStateRunning(false);
 					pm.setStateReady(false);
@@ -444,6 +445,9 @@ public class Sistema {
 						break;
 					case "dump":
 						dumpProcess(commandParts[1]);
+						break;
+					case "in":
+						handleIn(commandParts[1], commandParts[2]);
 						break;
 					default:
 						System.out.println("Comando inválido");
@@ -521,6 +525,21 @@ public class Sistema {
 			}
 		}
 
+		private void handleIn(String id, String value) {
+			for (ProcessControlBlock pcb : processosBloqueados) {
+				if (pcb.id == Integer.parseInt(id)) {
+					pcb.registradores[9] = Integer.parseInt(value);
+					try {
+						processosBloqueados.remove(pcb);
+						processosProntos.put(pcb);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+					break;
+				}
+			}
+		}
+
 		public void run() {
 			Thread commandThread = new Thread(() -> {
 				while (true) {
@@ -535,6 +554,17 @@ public class Sistema {
 				}
 			});
 			commandThread.start();
+
+			Thread OutThread = new Thread(() -> {
+				while (true) {
+					try {
+						ioSemaphore.acquire();
+						System.out.println("Out: " + output);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
+			});
 
 			while (true) {
 				try {
@@ -715,12 +745,31 @@ public class Sistema {
 					irpt = Interrupts.intInstrucaoInvalida;
 					break;
 				case SYSCALL:
-					sysCall.handle();
+					handleSyscall();
 					irpt = Interrupts.intIO;
 					pc++;
 					break;
 				default:
 					irpt = Interrupts.intInstrucaoInvalida;
+					break;
+			}
+		}
+
+		private void handleSyscall(){
+			int syscallCode = reg[8];
+			int parameter = reg[9];
+			switch (syscallCode) {
+				case 1:
+					System.out.println("IN " + pm.state.id);
+					pm.state.ioParameter = parameter;
+					break;
+				case 2:
+					int output = vm.mem.m[parameter].p;
+					System.out.println("Output: " + output);
+					break;
+				default:
+					System.out.println("Unsupported system call: " + syscallCode);
+					vm.cpu.irpt = Interrupts.intInstrucaoInvalida;
 					break;
 			}
 		}
@@ -749,54 +798,12 @@ public class Sistema {
 		public Memory mem;
 		public CPU cpu;
 
-		public VM(SysCallHandling sysCall, BlockingQueue<String> commandQueue, Semaphore semaforo) {
+		public VM(BlockingQueue<String> commandQueue, Semaphore semaforo) {
 			tamMem = 256;
 			tamPag = 4;
 			mem = new Memory(tamMem, tamPag);
 			m = mem.m;
-			cpu = new CPU(mem, sysCall, true, commandQueue, semaforo); // true liga debug
-		}
-	}
-
-	// -------------------------------------------------------------------------------------------------------
-	// --------------------- S O F T W A R E - definicoes de software
-	// ----------------------------------------
-	// -------------------------------------------------------------------------------------------------------
-
-	public class SysCallHandling {
-		private VM vm;
-
-		public void setVM(VM _vm) {
-			vm = _vm;
-		}
-
-		public void handle() {
-			int syscallCode = vm.cpu.reg[8];
-			int parameter = vm.cpu.reg[9];
-			switch (syscallCode) {
-				case 1:
-					handleInput(parameter);
-					break;
-				case 2:
-					handleOutput(parameter);
-					break;
-				default:
-					System.out.println("Unsupported system call: " + syscallCode);
-					vm.cpu.irpt = Interrupts.intInstrucaoInvalida;
-					break;
-			}
-		}
-
-		private void handleInput(int parameter) {
-			Scanner scanner = new Scanner(System.in);
-			System.out.print("Enter an integer: ");
-			int input = scanner.nextInt();
-			vm.mem.m[parameter].p = input;
-		}
-
-		private void handleOutput(int parameter) {
-			int output = vm.mem.m[parameter].p;
-			System.out.println("Output: " + output);
+			cpu = new CPU(mem, true, commandQueue, semaforo); // true liga debug
 		}
 	}
 
@@ -806,16 +813,13 @@ public class Sistema {
 	// -------------------------------------------------------------------------------------------------------
 
 	public VM vm;
-	public SysCallHandling sysCall;
 	public static Programas progs;
 	private BlockingQueue<String> commandQueue;
 
 	public Sistema() {
-		sysCall = new SysCallHandling();
 		commandQueue = new ArrayBlockingQueue<String>(100);
 		Semaphore semaforo = new Semaphore(1);
-		vm = new VM(sysCall, commandQueue, semaforo);
-		sysCall.setVM(vm);
+		vm = new VM(commandQueue, semaforo);
 		progs = new Programas();
 	}
 
