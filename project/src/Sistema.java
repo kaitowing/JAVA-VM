@@ -312,7 +312,7 @@ public class Sistema {
 		public ProcessManager pm;
 		private Semaphore memSemaphore;
 		private Semaphore ioSemaphore;
-		private String output;
+		private int output;
 
 		public CPU(Memory _mem, boolean _debug, BlockingQueue<String> _commandQueue,
 				Semaphore _semaphore) {
@@ -555,7 +555,7 @@ public class Sistema {
 			});
 			commandThread.start();
 
-			Thread OutThread = new Thread(() -> {
+			Thread outThread = new Thread(() -> {
 				while (true) {
 					try {
 						ioSemaphore.acquire();
@@ -565,6 +565,7 @@ public class Sistema {
 					}
 				}
 			});
+			outThread.start();
 
 			while (true) {
 				try {
@@ -764,8 +765,8 @@ public class Sistema {
 					pm.state.ioParameter = parameter;
 					break;
 				case 2:
-					int output = vm.mem.m[parameter].p;
-					System.out.println("Output: " + output);
+					output = vm.mem.m[parameter].p;
+					ioSemaphore.release();
 					break;
 				default:
 					System.out.println("Unsupported system call: " + syscallCode);
@@ -926,12 +927,24 @@ public class Sistema {
 		};
 
 		public Word[] subtrai = new Word[] {
-				new Word(Opcode.LDI, 0, -1, 50),
-				new Word(Opcode.SUBI, 0, -1, 5),
-				new Word(Opcode.STD, 0, -1, 4),
-				new Word(Opcode.STOP, -1, -1, -1),
-				new Word(Opcode.DATA, -1, -1, -1)
-		};
+			new Word(Opcode.LDI, 0, -1, 1),   // Carrega o valor 1 no registrador 0
+			new Word(Opcode.STD, 0, -1, 11),  // Armazena o valor do registrador 0 na posição de memória 11
+			new Word(Opcode.LDI, 1, -1, 2),   // Carrega o valor 2 no registrador 1
+			new Word(Opcode.STD, 1, -1, 12),  // Armazena o valor do registrador 1 na posição de memória 12
+			new Word(Opcode.LDI, 8, -1, 1),   // Carrega o código da syscall no registrador 8
+			new Word(Opcode.LDI, 9, -1, 0),   // Carrega o parâmetro da syscall no registrador 9
+			new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+			new Word(Opcode.JMP, -1, -1, 1),  // Pula para a instrução na posição de memória 1 (loop infinito)
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
+			new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
+	};
+	
 	}
 
 	// -------------------------------------------------------------------------------------------------------
