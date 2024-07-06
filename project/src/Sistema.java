@@ -167,7 +167,18 @@ public class Sistema {
 			} finally {
 				pcbSemaphore.release();
 			}
-		} 
+		}
+
+		public void resetIoParameter(int pcbId) {
+			try {
+				pcbSemaphore.acquire();
+				pcb[pcbId].ioParameter = -1;
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			} finally {
+				pcbSemaphore.release();
+			}
+		}
 
 		public void setStateRunning(boolean running) {
 			try {
@@ -263,6 +274,7 @@ public class Sistema {
 
 		public ProcessControlBlock(int id) {
 			tabelaPaginas = null;
+			ioParameter = -1;
 			registradores = new int[10];
 			ready = true;
 			processState = false;
@@ -313,12 +325,13 @@ public class Sistema {
 		private Semaphore memSemaphore;
 		private Semaphore ioSemaphore;
 		private int output;
+		private int outputId;
 
 		public CPU(Memory _mem, boolean _debug, BlockingQueue<String> _commandQueue,
 				Semaphore _semaphore) {
 			cpuCicles = 0;
 			processosProntos = new ArrayBlockingQueue<ProcessControlBlock>(100);
-			processosBloqueados = new ArrayList<ProcessControlBlock>();
+			processosBloqueados = new Vector<ProcessControlBlock>();
 			maxInt = 32767; // capacidade de representacao modelada
 			minInt = -32767; // se exceder deve gerar interrupcao de overflow
 			mem = _mem; // usa mem para acessar funcoes auxiliares (dump)
@@ -401,7 +414,7 @@ public class Sistema {
 					pm.desalocaProcesso(pm.state.id);
 					break;
 				case intProcessTimeup:
-					//System.out.println("Tempo de execucao esgotado");
+					// System.out.println("Tempo de execucao esgotado");
 					try {
 						processosProntos.put(pm.salvaEstadoProcesso(pm.state.id));
 						pm.setStateRunning(false);
@@ -434,6 +447,9 @@ public class Sistema {
 					case "trace1":
 						trace = true;
 						break;
+					case "trace0":
+						trace = false;
+						break;
 					case "new":
 						createProcess(commandParts[1]);
 						break;
@@ -446,8 +462,14 @@ public class Sistema {
 					case "dump":
 						dumpProcess(commandParts[1]);
 						break;
+					case "dumpmem":
+						mem.dump(0, mem.tamMem);
+						break;
 					case "in":
 						handleIn(commandParts[1], commandParts[2]);
+						break;
+					case "exit":
+						System.exit(0);
 						break;
 					default:
 						System.out.println("Comando inválido");
@@ -528,7 +550,10 @@ public class Sistema {
 		private void handleIn(String id, String value) {
 			for (ProcessControlBlock pcb : processosBloqueados) {
 				if (pcb.id == Integer.parseInt(id)) {
-					pcb.registradores[9] = Integer.parseInt(value);
+					if (!processosBloqueados.contains(pcb) || pcb.ioParameter == -1)
+						break;
+						mem.m[pcb.ioParameter].p = Integer.parseInt(value);
+						pm.resetIoParameter(pcb.id);
 					try {
 						processosBloqueados.remove(pcb);
 						processosProntos.put(pcb);
@@ -560,6 +585,14 @@ public class Sistema {
 					try {
 						ioSemaphore.acquire();
 						System.out.println("Out: " + output);
+						for (ProcessControlBlock pcb : processosBloqueados) {
+							if (pcb.id == outputId) {
+								pcb.ioParameter = output;
+								processosBloqueados.remove(pcb);
+								processosProntos.put(pcb);
+								break;
+							}
+						}
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
@@ -570,7 +603,7 @@ public class Sistema {
 			while (true) {
 				try {
 					ProcessControlBlock pcb = processosProntos.take();
-					if (pcb != null){
+					if (pcb != null) {
 						pm.setState(pcb);
 						pm.setStateRunning(true);
 						setContext(0, mem.tamMem - 1, pm.state.pc, pm.state.registradores);
@@ -586,7 +619,7 @@ public class Sistema {
 
 		private void executeInstructions() throws InterruptedException {
 			while (true) {
-				//System.out.println("Processo: " + pm.state.id);
+				// System.out.println("Processo: " + pm.state.id);
 				if (legal(pc)) {
 					cpuCicles++;
 					ir = m[mem.traduzEndereco(pc, pm.state.tabelaPaginas)];
@@ -756,7 +789,7 @@ public class Sistema {
 			}
 		}
 
-		private void handleSyscall(){
+		private void handleSyscall() {
 			int syscallCode = reg[8];
 			int parameter = reg[9];
 			switch (syscallCode) {
@@ -766,6 +799,7 @@ public class Sistema {
 					break;
 				case 2:
 					output = vm.mem.m[parameter].p;
+					outputId = pm.state.id;
 					ioSemaphore.release();
 					break;
 				default:
@@ -831,7 +865,7 @@ public class Sistema {
 		Thread shellThread = new Thread(() -> {
 			System.out.println("Digite um comando:");
 			System.out.println(
-					"new - cria um novo processo (fatorial, fibonacci10, fibonacciSYSCALL, fatorialSYSCALL, progMinimo, pb, pc)");
+					"new - cria um novo processo (fatorial, subtrai, soma, progminimo, progloopinfinito)");
 			System.out.println("rm - remove um processo");
 			System.out.println("ps - lista os processos");
 			System.out.println("dump [id] - mostra o conteúdo de um processo");
@@ -896,28 +930,26 @@ public class Sistema {
 		};
 
 		public Word[] progLoopInfinito = new Word[] {
-			new Word(Opcode.LDI, 0, -1, 1),   // Carrega o valor 1 no registrador 0
-			new Word(Opcode.STD, 0, -1, 11),  // Armazena o valor do registrador 0 na posição de memória 10
-			new Word(Opcode.LDI, 1, -1, 2),   // Carrega o valor 2 no registrador 1
-			new Word(Opcode.STD, 1, -1, 12),  // Armazena o valor do registrador 1 na posição de memória 11
-			new Word(Opcode.LDI, 2, -1, 3),   // Carrega o valor 3 no registrador 2
-			new Word(Opcode.STD, 2, -1, 13),  // Armazena o valor do registrador 2 na posição de memória 12
-			new Word(Opcode.LDI, 3, -1, 4),   // Carrega o valor 4 no registrador 3
-			new Word(Opcode.STD, 3, -1, 14),  // Armazena o valor do registrador 3 na posição de memória 13
-			new Word(Opcode.LDI, 4, -1, 5),   // Carrega o valor 5 no registrador 4
-			new Word(Opcode.STD, 4, -1, 15),  // Armazena o valor do registrador 4 na posição de memória 14
-			new Word(Opcode.JMP, -1, -1, 1), // Pula para a instrução na posição de memória 10 (loop infinito)
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
-};
-
-
+				new Word(Opcode.LDI, 0, -1, 1), // Carrega o valor 1 no registrador 0
+				new Word(Opcode.STD, 0, -1, 11), // Armazena o valor do registrador 0 na posição de memória 10
+				new Word(Opcode.LDI, 1, -1, 2), // Carrega o valor 2 no registrador 1
+				new Word(Opcode.STD, 1, -1, 12), // Armazena o valor do registrador 1 na posição de memória 11
+				new Word(Opcode.LDI, 2, -1, 3), // Carrega o valor 3 no registrador 2
+				new Word(Opcode.STD, 2, -1, 13), // Armazena o valor do registrador 2 na posição de memória 12
+				new Word(Opcode.LDI, 3, -1, 4), // Carrega o valor 4 no registrador 3
+				new Word(Opcode.STD, 3, -1, 14), // Armazena o valor do registrador 3 na posição de memória 13
+				new Word(Opcode.LDI, 4, -1, 5), // Carrega o valor 5 no registrador 4
+				new Word(Opcode.STD, 4, -1, 15), // Armazena o valor do registrador 4 na posição de memória 14
+				new Word(Opcode.JMP, -1, -1, 1), // Pula para a instrução na posição de memória 10 (loop infinito)
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
+		};
 
 		public Word[] soma = new Word[] {
 				new Word(Opcode.LDI, 0, -1, 5),
@@ -927,24 +959,24 @@ public class Sistema {
 		};
 
 		public Word[] subtrai = new Word[] {
-			new Word(Opcode.LDI, 0, -1, 1),   // Carrega o valor 1 no registrador 0
-			new Word(Opcode.STD, 0, -1, 11),  // Armazena o valor do registrador 0 na posição de memória 11
-			new Word(Opcode.LDI, 1, -1, 2),   // Carrega o valor 2 no registrador 1
-			new Word(Opcode.STD, 1, -1, 12),  // Armazena o valor do registrador 1 na posição de memória 12
-			new Word(Opcode.LDI, 8, -1, 1),   // Carrega o código da syscall no registrador 8
-			new Word(Opcode.LDI, 9, -1, 0),   // Carrega o parâmetro da syscall no registrador 9
-			new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
-			new Word(Opcode.JMP, -1, -1, 1),  // Pula para a instrução na posição de memória 1 (loop infinito)
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1),// Espaço de dados
-			new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
-	};
-	
+				new Word(Opcode.LDI, 0, -1, 1), // Carrega o valor 1 no registrador 0
+				new Word(Opcode.STD, 0, -1, 11), // Armazena o valor do registrador 0 na posição de memória 11
+				new Word(Opcode.LDI, 1, -1, 2), // Carrega o valor 2 no registrador 1
+				new Word(Opcode.STD, 1, -1, 12), // Armazena o valor do registrador 1 na posição de memória 12
+				new Word(Opcode.LDI, 8, -1, 1), // Carrega o código da syscall no registrador 8
+				new Word(Opcode.LDI, 9, -1, 0), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+				new Word(Opcode.JMP, -1, -1, 1), // Pula para a instrução na posição de memória 1 (loop infinito)
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
+		};
+
 	}
 
 	// -------------------------------------------------------------------------------------------------------
