@@ -318,7 +318,7 @@ public class Sistema {
 		private int limite; // por enquanto toda memoria pode ser acessada pelo processo rodando
 		private Memory mem; // mem tem funcoes de dump e o array m de memória 'fisica'
 		private Word[] m; // CPU acessa MEMORIA, guarda referencia a 'm'. m nao muda. semre será um array
-											// de palavras
+							// de palavras
 		private boolean debug; // se true entao mostra cada instrucao em execucao
 		private BlockingQueue<String> commandQueue;
 		public ProcessManager pm;
@@ -499,6 +499,12 @@ public class Sistema {
 				case "progloopinfinito":
 					pm.criaProcesso(progs.progLoopInfinito);
 					break;
+				case "chamain":
+					pm.criaProcesso(progs.chamain);
+					break;
+				case "chamaout":
+					pm.criaProcesso(progs.chamaout);
+					break;
 				default:
 					System.out.println("Processo inválido");
 					break;
@@ -519,10 +525,16 @@ public class Sistema {
 		private void listProcesses() {
 			boolean existeProcessos = false;
 			for (int i = 0; i < pm.pcb.length; i++) {
+				String rodando = "Rodando";
+				String status = "Bloqueado";
 				ProcessControlBlock pcb = pm.getPCB(i);
 				if (pcb != null) {
 					existeProcessos = true;
-					System.out.println("Processo " + i + ": " + pcb.processState + " - " + pcb.running);
+					if (pcb.ready)
+						status = "Pronto";
+					if (!pcb.running)
+						rodando = "Parado";
+					System.out.println("Processo " + i + ": " + status + " - " + rodando);
 				}
 			}
 			if (!existeProcessos) {
@@ -535,7 +547,7 @@ public class Sistema {
 				int processId = Integer.parseInt(processIdStr);
 				ProcessControlBlock pcb = pm.getPCB(processId);
 				if (pcb != null) {
-					System.out.println("Processo " + processId + ": " + pcb.processState + " - " + pcb.running);
+					System.out.println("Processo " + processId + ": " + pcb.ready + " - " + pcb.running);
 					for (int i = 0; i < pcb.tabelaPaginas.length; i++) {
 						vm.mem.dump(pcb.tabelaPaginas[i] * vm.tamPag, (pcb.tabelaPaginas[i] + 1) * vm.tamPag);
 					}
@@ -552,8 +564,8 @@ public class Sistema {
 				if (pcb.id == Integer.parseInt(id)) {
 					if (!processosBloqueados.contains(pcb) || pcb.ioParameter == -1)
 						break;
-						mem.m[pcb.ioParameter].p = Integer.parseInt(value);
-						pm.resetIoParameter(pcb.id);
+					mem.m[mem.traduzEndereco(pcb.ioParameter, pcb.tabelaPaginas)].p = Integer.parseInt(value);
+					pm.resetIoParameter(pcb.id);
 					try {
 						processosBloqueados.remove(pcb);
 						processosProntos.put(pcb);
@@ -798,7 +810,7 @@ public class Sistema {
 					pm.state.ioParameter = parameter;
 					break;
 				case 2:
-					output = vm.mem.m[parameter].p;
+					output = vm.mem.m[mem.traduzEndereco(parameter, pm.state.tabelaPaginas)].p;
 					outputId = pm.state.id;
 					ioSemaphore.release();
 					break;
@@ -977,6 +989,29 @@ public class Sistema {
 				new Word(Opcode.DATA, -1, -1, -1) // Espaço de dados
 		};
 
+		public Word[] chamain = new Word[] {
+				new Word(Opcode.LDI, 0, -1, 5),
+				new Word(Opcode.ADDI, 0, -1, 5),
+				new Word(Opcode.STD, 0, -1, 7), // Armazena o valor do registrador 0 na posição de memória 6
+				new Word(Opcode.LDI, 8, -1, 1), // Carrega o código da syscall no registrador 8
+				new Word(Opcode.LDI, 9, -1, 8), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+				new Word(Opcode.STOP, -1, -1, -1),
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+		};
+
+		public Word[] chamaout = new Word[] {
+				new Word(Opcode.LDI, 0, -1, 5),
+				new Word(Opcode.ADDI, 0, -1, 5),
+				new Word(Opcode.STD, 0, -1, 7), // Armazena o valor do registrador 0 na posição de memória 7
+				new Word(Opcode.LDI, 8, -1, 2), // Carrega o código da syscall no registrador 8
+				new Word(Opcode.LDI, 9, -1, 7), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+				new Word(Opcode.STOP, -1, -1, -1),
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
+		};
 	}
 
 	// -------------------------------------------------------------------------------------------------------
