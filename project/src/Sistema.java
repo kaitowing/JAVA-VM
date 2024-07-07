@@ -312,12 +312,8 @@ public class Sistema {
 		private Word ir; // instruction register
 		private int[] reg; // registradores da CPU
 		private Interrupts irpt; // durante instrucao, interrupcao pode ser sinalizada
-		private int base; // base e limite de acesso na memoria
-		private int limite; // por enquanto toda memoria pode ser acessada pelo processo rodando
 		private Memory mem; // mem tem funcoes de dump e o array m de memória 'fisica'
 		private Word[] m; // CPU acessa MEMORIA, guarda referencia a 'm'. m nao muda. semre será um array
-							// de palavras
-		private boolean debug; // se true entao mostra cada instrucao em execucao
 		private BlockingQueue<String> commandQueue;
 		public ProcessManager pm;
 		private Semaphore memSemaphore;
@@ -335,7 +331,6 @@ public class Sistema {
 			mem = _mem; // usa mem para acessar funcoes auxiliares (dump)
 			m = mem.m; // usa o atributo 'm' para acessar a memoria.
 			reg = new int[10]; // aloca o espaço dos registradores - regs 8 e 9 usados somente para IO
-			debug = _debug; // se true, print da instrucao em execucao
 			trace = false;
 			commandQueue = _commandQueue;
 			memSemaphore = new Semaphore(1);
@@ -381,9 +376,7 @@ public class Sistema {
 			return true;
 		}
 
-		public void setContext(int _base, int _limite, int _pc, int[] _reg) {
-			base = _base;
-			limite = _limite;
+		public void setContext(int _pc, int[] _reg) {
 			reg = _reg;
 			pc = _pc;
 			irpt = Interrupts.noInterrupt;
@@ -619,7 +612,7 @@ public class Sistema {
 					if (pcb != null) {
 						pm.setState(pcb);
 						pm.setStateRunning(true);
-						setContext(0, mem.tamMem - 1, pm.state.pc, pm.state.registradores);
+						setContext(pm.state.pc, pm.state.registradores);
 						memSemaphore.acquire();
 						executeInstructions();
 						memSemaphore.release();
@@ -827,7 +820,7 @@ public class Sistema {
 				interruptHandle();
 				cpuCicles = 0;
 				return true;
-			} else if (cpuCicles == 3) {
+			} else if (cpuCicles == 5) {
 				irpt = Interrupts.intProcessTimeup;
 			}
 			return false;
@@ -977,7 +970,7 @@ public class Sistema {
 				new Word(Opcode.LDI, 1, -1, 2), // Carrega o valor 2 no registrador 1
 				new Word(Opcode.STD, 1, -1, 12), // Armazena o valor do registrador 1 na posição de memória 12
 				new Word(Opcode.LDI, 8, -1, 1), // Carrega o código da syscall no registrador 8
-				new Word(Opcode.LDI, 9, -1, 0), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.LDI, 9, -1, 8), // Carrega o parâmetro da syscall no registrador 9
 				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
 				new Word(Opcode.JMP, -1, -1, 1), // Pula para a instrução na posição de memória 1 (loop infinito)
 				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
@@ -1027,16 +1020,5 @@ public class Sistema {
 			m[i].r2 = p[i].r2;
 			m[i].p = p[i].p;
 		}
-	}
-
-	private void loadAndExec(Word[] p) {
-		loadProgram(p, vm.m); // carga do programa na memoria
-		System.out.println("---------------------------------- programa carregado na memoria");
-		vm.mem.dump(0, p.length); // dump da memoria nestas posicoes
-		vm.cpu.setContext(0, vm.tamMem - 1, 0, null); // seta estado da cpu
-		System.out.println("---------------------------------- inicia execucao ");
-		vm.cpu.run(); // cpu roda programa ate parar
-		System.out.println("---------------------------------- memoria após execucao ");
-		vm.mem.dump(0, p.length); // dump da memoria com resultado
 	}
 }
