@@ -116,18 +116,15 @@ public class Sistema {
 		private ProcessControlBlock[] pcb;
 		private ProcessControlBlock state;
 		private BlockingQueue<ProcessControlBlock> processosProntos;
-		private List<ProcessControlBlock> processosBloqueados;
 		private Semaphore pcbSemaphore;
 		private Memory mem;
 		private int id;
 
-		public ProcessManager(Memory mem, BlockingQueue<ProcessControlBlock> _processosProntos,
-				List<ProcessControlBlock> _processosBloqueados, Semaphore _pcbSemaphore) {
+		public ProcessManager(Memory mem, BlockingQueue<ProcessControlBlock> _processosProntos, Semaphore _pcbSemaphore) {
 			id = 0;
 			this.mem = mem;
 			pcb = new ProcessControlBlock[mem.numFrames];
 			processosProntos = _processosProntos;
-			processosBloqueados = _processosBloqueados;
 			pcbSemaphore = _pcbSemaphore;
 		}
 
@@ -227,6 +224,7 @@ public class Sistema {
 				mem.desaloca(auxpcb.tabelaPaginas);
 				try {
 					pcbSemaphore.acquire();
+					vm.cpu.processosBloqueados.remove(auxpcb);
 					pcb[id] = null;
 				} catch (InterruptedException e) {
 					e.printStackTrace();
@@ -341,7 +339,7 @@ public class Sistema {
 			trace = false;
 			commandQueue = _commandQueue;
 			memSemaphore = new Semaphore(1);
-			pm = new ProcessManager(mem, processosProntos, processosBloqueados, _semaphore);
+			pm = new ProcessManager(mem, processosProntos, _semaphore);
 			ioSemaphore = new Semaphore(0);
 		}
 
@@ -466,7 +464,9 @@ public class Sistema {
 						mem.dump(0, mem.tamMem);
 						break;
 					case "in":
-						handleIn(commandParts[1], commandParts[2]);
+						if (!handleIn(commandParts[1], commandParts[2])){
+							System.out.println("Processo não encontrado ou não está esperando entrada");
+						}
 						break;
 					case "exit":
 						System.exit(0);
@@ -559,7 +559,7 @@ public class Sistema {
 			}
 		}
 
-		private void handleIn(String id, String value) {
+		private boolean handleIn(String id, String value) {
 			for (ProcessControlBlock pcb : processosBloqueados) {
 				if (pcb.id == Integer.parseInt(id)) {
 					if (!processosBloqueados.contains(pcb) || pcb.ioParameter == -1)
@@ -572,9 +572,10 @@ public class Sistema {
 					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
-					break;
+					return true;
 				}
 			}
+			return false;
 		}
 
 		public void run() {
