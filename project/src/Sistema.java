@@ -1,5 +1,10 @@
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Scanner;
+import java.util.Vector;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Semaphore;
 
 public class Sistema {
 
@@ -120,7 +125,8 @@ public class Sistema {
 		private Memory mem;
 		private int id;
 
-		public ProcessManager(Memory mem, BlockingQueue<ProcessControlBlock> _processosProntos, Semaphore _pcbSemaphore) {
+		public ProcessManager(Memory mem, BlockingQueue<ProcessControlBlock> _processosProntos,
+				Semaphore _pcbSemaphore) {
 			id = 0;
 			this.mem = mem;
 			pcb = new ProcessControlBlock[mem.numFrames];
@@ -405,7 +411,6 @@ public class Sistema {
 					pm.desalocaProcesso(pm.state.id);
 					break;
 				case intProcessTimeup:
-					// System.out.println("Tempo de execucao esgotado");
 					try {
 						processosProntos.put(pm.salvaEstadoProcesso(pm.state.id));
 						pm.setStateRunning(false);
@@ -457,7 +462,7 @@ public class Sistema {
 						mem.dump(0, mem.tamMem);
 						break;
 					case "in":
-						if (!handleIn(commandParts[1], commandParts[2])){
+						if (!handleIn(commandParts[1], commandParts[2])) {
 							System.out.println("Processo não encontrado ou não está esperando entrada");
 						}
 						break;
@@ -508,7 +513,7 @@ public class Sistema {
 			try {
 				int processId = Integer.parseInt(processIdStr);
 				if (!pm.desalocaProcesso(processId)) {
-					System.out.println("Processo não encontrado");
+					System.out.println("Processo não encontrado ou está rodando");
 				}
 			} catch (Exception e) {
 				System.out.println("Processo inválido");
@@ -625,7 +630,6 @@ public class Sistema {
 
 		private void executeInstructions() throws InterruptedException {
 			while (true) {
-				// System.out.println("Processo: " + pm.state.id);
 				if (legal(pc)) {
 					cpuCicles++;
 					ir = m[mem.traduzEndereco(pc, pm.state.tabelaPaginas)];
@@ -876,8 +880,7 @@ public class Sistema {
 			System.out.println("ps - lista os processos");
 			System.out.println("dump [id] - mostra o conteúdo de um processo");
 			System.out.println("dumpmem - mostra o conteúdo da memória");
-			System.out.println("executa [id] - executa um processo");
-			System.out.println("execall - executa todos os processos");
+			System.out.println("executa - executa todos os processos");
 			System.out.println("allocateall - aloca todos os processos");
 			System.out.println("trace1 - ativa o trace");
 			System.out.println("trace0 - desativa o trace");
@@ -965,14 +968,20 @@ public class Sistema {
 		};
 
 		public Word[] subtrai = new Word[] {
-				new Word(Opcode.LDI, 0, -1, 1), // Carrega o valor 1 no registrador 0
-				new Word(Opcode.STD, 0, -1, 11), // Armazena o valor do registrador 0 na posição de memória 11
-				new Word(Opcode.LDI, 1, -1, 2), // Carrega o valor 2 no registrador 1
-				new Word(Opcode.STD, 1, -1, 12), // Armazena o valor do registrador 1 na posição de memória 12
 				new Word(Opcode.LDI, 8, -1, 1), // Carrega o código da syscall no registrador 8
-				new Word(Opcode.LDI, 9, -1, 8), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.LDI, 9, -1, 14), // Carrega o parâmetro da syscall no registrador 9
 				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
-				new Word(Opcode.JMP, -1, -1, 1), // Pula para a instrução na posição de memória 1 (loop infinito)
+				new Word(Opcode.LDI, 8, -1, 1),
+				new Word(Opcode.LDI, 9, -1, 15), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+				new Word(Opcode.LDD, 0, -1, 14),
+				new Word(Opcode.LDD, 1, -1, 15),
+				new Word(Opcode.SUB, 0, 1, -1),
+				new Word(Opcode.STD, 0, -1, 16),
+				new Word(Opcode.LDI, 8, -1, 2), // Carrega o código da syscall no registrador 8
+				new Word(Opcode.LDI, 9, -1, 16), // Carrega o parâmetro da syscall no registrador 9
+				new Word(Opcode.SYSCALL, -1, -1, -1), // Chamada de sistema para IO
+				new Word(Opcode.STOP, -1, -1, -1), // Pula para a instrução na posição de memória 1 (loop infinito)
 				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
 				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
 				new Word(Opcode.DATA, -1, -1, -1), // Espaço de dados
